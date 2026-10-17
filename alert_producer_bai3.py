@@ -1,13 +1,14 @@
-"""Bài 3: phát cảnh báo qua direct exchange theo routing key."""
+"""Bài 3: gửi cảnh báo qua direct exchange theo routing key."""
 
 import argparse
+import os
 
 import pika
 
-from amqp_common import ALERT_EXCHANGE, close_connection, create_connection
-from message_utils import ALERT_LEVELS
 
-
+EXCHANGE = "iot_alert_exchange"
+DEFAULT_AMQP_URL = "amqp://guest:guest@localhost:5672/%2F"
+ALERT_LEVELS = ("info", "warning", "critical")
 SAMPLE_ALERTS = (
     ("info", "He thong IoT dang hoat dong binh thuong"),
     ("warning", "Nhiet do phong may vuot nguong warning"),
@@ -20,9 +21,9 @@ def main():
     parser.add_argument("--level", choices=ALERT_LEVELS, help="Mức cảnh báo cần gửi")
     parser.add_argument("--message", help="Nội dung cảnh báo tự chọn")
     args = parser.parse_args()
-    if args.message and not args.level:
+    if args.message is not None and not args.level:
         parser.error("--message cần đi kèm --level")
-    if args.level and args.message is not None and not args.message.strip():
+    if args.message is not None and not args.message.strip():
         parser.error("--message không được để trống")
     alerts = (
         [(args.level, args.message or f"Canh bao muc {args.level}")]
@@ -30,21 +31,23 @@ def main():
         else SAMPLE_ALERTS
     )
 
-    connection = create_connection()
+    parameters = pika.URLParameters(os.getenv("AMQP_URL", DEFAULT_AMQP_URL))
+    connection = pika.BlockingConnection(parameters)
     try:
         channel = connection.channel()
-        channel.exchange_declare(exchange=ALERT_EXCHANGE, exchange_type="direct", durable=True)
+        channel.exchange_declare(exchange=EXCHANGE, exchange_type="direct", durable=True)
         channel.confirm_delivery()
         for level, message in alerts:
             channel.basic_publish(
-                exchange=ALERT_EXCHANGE,
+                exchange=EXCHANGE,
                 routing_key=level,
                 body=message.encode("utf-8"),
                 properties=pika.BasicProperties(content_type="text/plain", delivery_mode=2),
             )
             print(f"Da gui [{level}]: {message}")
     finally:
-        close_connection(connection)
+        if connection.is_open:
+            connection.close()
 
 
 if __name__ == "__main__":
